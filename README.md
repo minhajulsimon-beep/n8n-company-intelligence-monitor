@@ -13,6 +13,9 @@ An **n8n + PostgreSQL/Supabase** workflow that retrieves companies from a databa
 
 ## Workflow
 
+![n8n Workflow Overview](workflow-overview.png)
+
+
 ```text
 Manual Trigger
     ↓
