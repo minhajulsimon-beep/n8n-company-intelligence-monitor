@@ -1,0 +1,409 @@
+{
+  "name": "Company News Monitoring and Event Classification",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "9af5bf10-0ad5-4dba-bda4-b3fb60fbfcf8",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM companies\nWHERE active = true\nORDER BY id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "921b1168-b549-439e-be13-f04979104c51",
+      "name": "Execute a SQL query"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "b06b873e-bf04-4988-8f90-6901704cc982",
+      "name": "Loop Companies"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5983e491-9282-4c46-8cd2-07d64c8a4f9b",
+              "name": "news_rss_url",
+              "value": "={{ 'https://news.google.com/rss/search?q=' + encodeURIComponent($json.company_name) + '&hl=en&gl=US&ceid=US:en' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        208
+      ],
+      "id": "f99e4de7-5ef2-4307-9aed-69e50b39cf1f",
+      "name": "Build News Search"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.news_rss_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        208
+      ],
+      "id": "2ed5012e-d549-4aee-878d-969fbfcfc42c",
+      "name": "RSS Read"
+    },
+    {
+      "parameters": {
+        "maxItems": 10
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1264,
+        256
+      ],
+      "id": "9bab28ab-d220-4209-b113-56acbbbb41f7",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "60d8ad68-7df6-40da-a4d5-e8305657031f",
+              "name": "company_id",
+              "value": "={{ $('Loop Companies').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "67994302-4634-4ba8-9aff-cd80452a1457",
+              "name": "company_name",
+              "value": "={{ $('Loop Companies').item.json.company_name }}",
+              "type": "string"
+            },
+            {
+              "id": "5e3b529a-ff5a-4fdb-9e6f-06fced89fce8",
+              "name": "source_type",
+              "value": "google_news",
+              "type": "string"
+            },
+            {
+              "id": "5d4c6f8c-aa81-4ec3-9401-0e40c2eda0e1",
+              "name": "source_url",
+              "value": "={{ $json.link }}",
+              "type": "string"
+            },
+            {
+              "id": "b1398505-2700-41c5-b64f-50cb839f68ca",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "ac61609b-a1e2-4628-874c-9c992cf3fe3c",
+              "name": "published_at",
+              "value": "={{ $json.pubDate }}",
+              "type": "string"
+            },
+            {
+              "id": "4cb85e6f-8e35-45eb-a9ba-8c33a109f53c",
+              "name": "content",
+              "value": "={{ $json.content || $json.contentSnippet || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1488,
+        256
+      ],
+      "id": "e6943664-cc63-4afb-a736-d83da95ed713",
+      "name": "Normalize Article"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH inserted AS (\n    INSERT INTO observations (\n        company_id,\n        source_type,\n        source_url,\n        title,\n        content,\n        published_at\n    )\n    VALUES ($1, $2, $3, $4, $5, $6)\n    ON CONFLICT (company_id, source_url)\n    DO NOTHING\n    RETURNING id\n)\nSELECT\n    EXISTS (SELECT 1 FROM inserted) AS is_new,\n    (SELECT id FROM inserted LIMIT 1) AS observation_id,\n    $1::bigint AS company_id,\n    $2::text AS source_type,\n    $3::text AS source_url,\n    $4::text AS title,\n    $5::text AS content,\n    $6::timestamptz AS published_at,\n    $7::text AS company_name;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [\n  $json.company_id,\n  $json.source_type,\n  $json.source_url,\n  $json.title,\n  $json.content,\n  $json.published_at,\n  $json.company_name\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "44255612-ee18-46fe-a800-8d231183cdae",
+      "name": "Save New Observations"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a2ec2639-fce3-4f6d-afce-17ea0efc552b",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        -96
+      ],
+      "id": "7f28ac56-9da8-4ca5-a81e-5abc22e6f1f5",
+      "name": "Is New Article?"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst categories = {\n  acquisition: [\n    \"acquired\", \"acquires\", \"acquisition\",\n    \"merger\", \"merged\", \"takeover\"\n  ],\n  funding: [\n    \"funding\", \"raised\", \"investment\",\n    \"series a\", \"series b\", \"series c\"\n  ],\n  partnership: [\n    \"partnership\", \"partnered\", \"collaboration\",\n    \"joint venture\"\n  ],\n  leadership: [\n    \"new ceo\", \"appointed\", \"new cfo\",\n    \"steps down\", \"resigned\"\n  ],\n  expansion: [\n    \"expansion\", \"new office\", \"new factory\",\n    \"expanding\", \"new market\"\n  ],\n  layoffs: [\n    \"layoffs\", \"job cuts\", \"workforce reduction\",\n    \"restructuring\"\n  ]\n};\n\n\nreturn $input.all().map(item => {\n  const article = item.json;\n\n  const text = [\n    article.title || \"\",\n    article.description || \"\",\n    article.content || \"\"\n  ].join(\" \").toLowerCase();\n\n  let eventType = \"other\";\n  let matchedKeywords = [];\n\n  for (const [category, keywords] of Object.entries(categories)) {\n    const matches = keywords.filter(keyword =>\n      text.includes(keyword)\n    );\n\n    if (matches.length > 0) {\n      eventType = category;\n      matchedKeywords = matches;\n      break;\n    }\n  }\n\n  return {\n    json: {\n      ...article,\n      event_type: eventType,\n      matched_keywords: matchedKeywords,\n      classification_method: \"rule_based\",\n      is_significant: eventType !== \"other\"\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -192
+      ],
+      "id": "73898477-fe91-441d-85e7-b54b66be2d30",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8a3b1880-cfc6-488a-88aa-23f6860631bf",
+              "leftValue": "={{ $json.is_significant }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        -192
+      ],
+      "id": "f1ed9160-6217-49f5-810c-4dba1f01d8fc",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nINSERT INTO public.events (\n    company_id,\n    observation_id,\n    event_type,\n    title,\n    summary,\n    event_date,\n    status,\n    matched_keywords,\n    classification_method,\n    is_significant\n)\nSELECT\n    $1::bigint,\n    $2::bigint,\n    $3::text,\n    $4::text,\n    NULL,\n    $5::timestamptz::date,\n    'candidate',\n    $6::jsonb,\n    'rule_based',\n    TRUE\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM public.events\n    WHERE observation_id = $2::bigint\n);\n",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.company_id,\n  $json.observation_id,\n  $json.event_type,\n  $json.title,\n  $json.published_at || null,\n  JSON.stringify($json.matched_keywords || [])\n] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        -288
+      ],
+      "id": "d29301e5-f84f-4927-afb8-c44c8c11918f",
+      "name": "Save Classified Events"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Loop Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Companies": {
+      "main": [
+        [
+          {
+            "node": "Save New Observations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build News Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build News Search": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Normalize Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Article": {
+      "main": [
+        [
+          {
+            "node": "Loop Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save New Observations": {
+      "main": [
+        [
+          {
+            "node": "Is New Article?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Article?": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Save Classified Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
